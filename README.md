@@ -18,12 +18,12 @@ You're building an internal autonomous migration agent. Input is a HAR file from
 cursor-setup-v2/
 ├── .cursorrules                 ← Cursor auto-loads this (project rules)
 ├── README.md                    ← This file
-├── docs/                        ← 13 knowledge docs
+├── docs/                        ← 14 knowledge docs
 │   ├── 01-project-brief.md
 │   ├── 02-platform-differences.md
 │   ├── 03-glossary.md
 │   ├── 04-migration-rules-and-edge-cases.md
-│   ├── 05-parser-spec.md
+│   ├── 05-parser-spec.md             ⚠️ DEPRECATED (superseded by 14)
 │   ├── 06-book-integration-mapping.csv
 │   ├── 07-sample-process-template.md
 │   ├── 08-v2-api-spec.md
@@ -31,7 +31,8 @@ cursor-setup-v2/
 │   ├── 10-test-plan-generation-spec.md
 │   ├── 11-end-state-report-format.md
 │   ├── 12-input-specification.md     ⭐ NEW (HAR-first input)
-│   └── 13-technical-architecture.md  ⭐ NEW (consolidated plan)
+│   ├── 13-technical-architecture.md  ⭐ NEW (consolidated plan)
+│   └── 14-analyzer-spec.md           ⭐ NEW (LLM-based analyzer, replaces 05)
 └── samples/
     └── README.md                ← How to add real HAR captures
 ```
@@ -84,7 +85,7 @@ cursor .
 
 ## Step 5 — Capture & Add Real HAR Bundles
 
-This is **the most important prep step**. Without real HARs, you can't validate the extractor or parser.
+This is **the most important prep step**. Without real HARs, you can't validate the extractor or analyzer.
 
 ### How to capture a HAR
 1. Open Chrome → v1 Kognitos UI → your target agent
@@ -117,7 +118,8 @@ Not needed for MVP (Phases 0-3), but needed when autonomous agent kicks in:
    KOGNITOS_WORKSPACE_ID=...
    KOGNITOS_MCP_URL=https://mcp.us-1.kognitos.com/
    KOGNITOS_API_BASE=https://app.us-1.kognitos.com
-   ANTHROPIC_API_KEY=...
+   OPENAI_API_KEY=...                      # Process Analyzer (Phase 1)
+   ANTHROPIC_API_KEY=...                    # SOP + test plan (Phase 3)
    ```
 
 ---
@@ -166,32 +168,24 @@ Build in /src/lib/har/:
 Tests against samples/agent-bundles/*.har. Verify zero auth headers survive sanitization.
 ```
 
-### Phase 1 — Parser
+### Phase 1 — Process Analyzer (LLM-based)
 ```
-Phase 1: implementing the v1 parser. Spec: @docs/05-parser-spec.md.
+Phase 1: implementing the v1 Process Analyzer. Spec: @docs/14-analyzer-spec.md.
+(The hand-written parser in @docs/05-parser-spec.md is DEPRECATED — do not build it.)
 
-Build /src/lib/parser/:
-1. types.ts — V1ProcessIR from spec Section 4
-2. tokenizer.ts (handles indentation normalization, MR-1)
-3. grammar.ts — recursive descent per Section 3
-4. expressions.ts
-5. resolver.ts (handles `the above`, MR-4)
-6. index.ts — parseV1Process() entrypoint
+Build /src/lib/analyzer/:
+1. prompt.ts — buildSystemPrompt() (inline IR schema + detection/MR rules:
+   MR-2 ask/get/find, MR-19 parallel subprocess, MR-43 HAR refs) +
+   buildUserPrompt(source, context); CallGraphContext type
+2. schema.ts — V1ProcessIRSchema (Zod), kept structurally identical to @/types/ir
+3. client.ts — analyzeProcess(source, context): OpenAI (GPT-4o) JSON mode →
+   parse → Zod validate → ONE corrective retry on failure →
+   deterministic stampMetadata(); AnalyzerError, ANALYZER_VERSION
+4. index.ts — public exports
 
-Critical: capture procedureId from inline @{...} subprocess refs (HAR format).
-Tests: parse each ExtractedProcess from sample HARs.
-```
-
-### Phase 2 — Mapping
-```
-Phase 2: book→integration mapping. Use @docs/06-book-integration-mapping.csv.
-
-Build /src/lib/mapping/:
-1. catalog.ts — typed CSV loader
-2. enricher.ts — walk IR's bookUsages, add v2 mapping
-3. flagger.ts — emit flags per @docs/04-migration-rules-and-edge-cases.md (MR-8 to MR-13)
-
-Tests verify all 90+ mappings load and special cases (Legacy→current, Custom Actions, etc.) flag correctly.
+Input: ExtractedProcess.text + call-graph context. Output: V1ProcessIR directly.
+Book→integration mapping context is folded into the prompt (no separate enricher).
+Requires OPENAI_API_KEY. Tests: integration tests on golden fixtures.
 ```
 
 ### Phase 3 — SOP + Test Plan
@@ -299,8 +293,7 @@ That gets you a scaffolded project with a working HAR sanitizer + extractor skel
 
 - ✅ Phase 0: `npm run dev` shows Next.js page
 - ✅ Phase 0.5: Drop a HAR → get back ExtractedAgentBundle JSON; auth headers verified gone
-- ✅ Phase 1: Bundle → parsed IRs for each process
-- ✅ Phase 2: IR is enriched with v2 integration mappings
+- ✅ Phase 1: Drop a HAR → get back IR JSONs from the analyzer (one `V1ProcessIR` per process)
 - ✅ Phase 3: Clean v2 SOP + test plan output
 - ✅ Phase 4: Verify Connections programmatically
 - ✅ Phase 5: An automation gets created + tested + published in your v2 test workspace

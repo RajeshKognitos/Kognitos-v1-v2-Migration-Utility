@@ -130,7 +130,9 @@ When writing v2 SOPs, prefer this vocabulary:
 |---|---|
 | v1 Process source | Plain text or `.txt`/`.md` containing the DSL |
 | v1 Agent Export | `.json` file from Legacy Export Agent feature |
-| IR (Intermediate Representation) | JSON structure output by our parser |
+| Analyzer | LLM-based component (`src/lib/analyzer/`) that converts v1 process source into `V1ProcessIR`. Replaces the traditional hand-written parser. See `14-analyzer-spec.md`. |
+| JSON mode | OpenAI feature that guarantees valid JSON output from the model (`response_format: { type: 'json_object' }`); used by the Analyzer. |
+| IR (Intermediate Representation) | JSON structure (`V1ProcessIR`) output by our analyzer |
 | SOP (Standard Operating Procedure) | Natural language v2-ready document |
 | Migration Checklist | Actionable items the user must do in v2 after migrating |
 | REST API v2 | Base URL `rest-api.app.kognitos.com/v2`; `x-api-key` header |

@@ -68,7 +68,7 @@ USER INTERFACE (Next.js)
   - Download migration report
 
 PIPELINE LAYER
-  HAR Extractor (P0.5) → Parser (P1) → Mapping Enricher (P2)
+  HAR Extractor (P0.5) → Process Analyzer (P1, OpenAI GPT-4o + Zod)
     → SOP+Test Plan Generator (P3, Claude) → Agent (P5, MCP+REST)
     → Report Generator (P6)
 
@@ -106,8 +106,7 @@ EXTERNAL APIS
 │   │   └── page.tsx              # Dashboard
 │   ├── /lib/
 │   │   ├── /har/                 # P0.5 — HAR extraction
-│   │   ├── /parser/              # P1 — v1 DSL → IR
-│   │   ├── /mapping/             # P2 — book → integration
+│   │   ├── /analyzer/            # P1 — LLM-based v1 source → IR (OpenAI + Zod)
 │   │   ├── /sop/                 # P3 — Claude prompts + generation
 │   │   ├── /kognitos/            # MCP + REST clients
 │   │   ├── /agent/               # P5 — XState machine + steps
@@ -141,14 +140,13 @@ EXTERNAL APIS
 - Process + call graph extraction
 - Validated against real HAR
 
-### Phase 1 — Parser (Days 4-6)
-- `/src/lib/parser/` per `05-parser-spec.md`
-- IR types
-- Tests against extracted HAR samples
-
-### Phase 2 — Mapping Enricher (Day 7)
-- Book→Integration lookup from CSV
-- Enrichment + flag emission
+### Phase 1 — Process Analyzer (LLM-based) (Day 4)
+- `/src/lib/analyzer/` per `14-analyzer-spec.md`
+- OpenAI (GPT-4o) + JSON mode + Zod validation + ONE corrective retry
+- Deterministic metadata stamping; reuses IR types in `src/types/ir.ts`
+- Takes `ExtractedProcess.text` + call-graph context → `V1ProcessIR` directly
+- Book→Integration mapping context folded into the analyzer prompt (no separate enricher phase)
+- Integration tests on golden fixtures
 
 ### Phase 3 — SOP + Test Plan Generator (Days 8-10)
 - Claude prompts + Zod validation
@@ -173,7 +171,9 @@ EXTERNAL APIS
 - E2E tests, performance, UX polish
 - Documentation + runbook
 
-**Total: ~5 weeks. MVP (Phases 0-3): ~10 days.**
+**Total: ~3 weeks. MVP (Phases 0-3): ~8 days.**
+
+> The LLM analyzer collapsed the original Phase 1 (parser, ~3 days) and Phase 2 (mapping enricher, ~1 day) into a single ~1-day orchestrator step, trimming the overall estimate from ~5 weeks to ~3 weeks.
 
 ---
 
@@ -193,6 +193,9 @@ EXTERNAL APIS
 | 10 | Connection OAuth flow handling? | Human-in-loop one-time setup per integration | Jun 2026 |
 | 11 | Webhook fallback for run state? | Polling (no webhooks documented) | Jun 2026 |
 | 12 | HAR sanitization scope? | Strip ALL auth headers + drop non-Kognitos entries | Jun 2026 |
+| 13 | Parser approach? | Replaced hand-written parser with LLM analyzer (OpenAI GPT-4o + Zod); dropped build time from ~5 weeks to ~3 weeks | Jun 2026 |
+| 14 | LLM provider? | OpenAI GPT-4o (had OpenAI key; analyzer is provider-agnostic) | Jun 2026 |
+| 15 | Mapping enricher (Phase 2)? | Folded into analyzer prompt context (not a separate phase); helped cut the estimate to ~3 weeks | Jun 2026 |
 
 ---
 
@@ -223,7 +226,7 @@ EXTERNAL APIS
 
 Per migrated process:
 - ✅ HAR extractor produces complete bundle (all subprocesses captured)
-- ✅ Parser produces IR with zero crashes on real input
+- ✅ Analyzer produces schema-valid IR with zero crashes on real input
 - ✅ All books mapped or flagged as Manual
 - ✅ SOP captures business intent (not v1 syntax)
 - ✅ Test plan covers happy path + 2+ edge cases
@@ -242,7 +245,7 @@ Per migrated process:
 | 02 | Platform differences | v1 vs v2 deep comparison |
 | 03 | Glossary | Terminology mapping |
 | 04 | Migration rules | 40+ numbered rules + edge cases |
-| 05 | Parser spec | v1 DSL grammar + IR schema |
+| 05 | ~~Parser spec~~ | ⚠️ **DEPRECATED** — v1 DSL grammar + IR schema (superseded by 14) |
 | 06 | Book mapping CSV | ~90 v1 books → v2 integrations |
 | 07 | Sample process template | Test data guidance |
 | 08 | v2 API spec | REST + MCP endpoints we use |
@@ -251,3 +254,4 @@ Per migrated process:
 | 11 | End-state report format | Migration report structure |
 | 12 | **Input specification** | **HAR-first input architecture** ⭐ |
 | 13 | **Technical architecture** | **Consolidated technical plan** ⭐ |
+| 14 | **Analyzer spec** | **LLM-based v1 source → IR (replaces 05)** ⭐ |

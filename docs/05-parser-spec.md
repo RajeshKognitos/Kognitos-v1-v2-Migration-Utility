@@ -1,5 +1,11 @@
 # Parser Spec — Kognitos v1 DSL → IR
 
+> ⚠️ **DEPRECATED — superseded by [14-analyzer-spec.md](./14-analyzer-spec.md).**
+> This document described a hand-written parser approach that was replaced by an LLM-based analyzer in June 2026.
+> Kept for historical reference and as a fallback design if the analyzer approach proves insufficient.
+
+---
+
 > The definitive grammar and IR specification for the v1 process parser. This doc is the source of truth for Phase 1 (Parser) implementation.
 >
 > **Input source:** The parser typically consumes one `ExtractedProcess.text` at a time from the HAR Extractor (see `12-input-specification.md`). It also supports raw text input from Tier-2 fallback (paste/upload).

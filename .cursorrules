@@ -1,0 +1,70 @@
+# Cursor Project Rules — Kognitos v1→v2 Migration Utility
+
+You are working on an **internal autonomous migration agent** that ports Kognitos v1 (Legacy) processes to v2 (Current) Automations from HAR file capture.
+
+**The big picture:** HAR in → bundle → IR → SOP/test plan → human OAuth setup → autonomous agent builds v2 → report out.
+
+Tech: Next.js 15 (App Router) + TypeScript (strict) + Tailwind on Vercel. XState v5 for the agent. OpenAI GPT-4o for the Process Analyzer (Phase 1). Anthropic Claude for SOP/test-plan generation (Phase 3). MCP + REST for Kognitos v2 control. Persistence in Vercel KV (prod) / better-sqlite3 (dev).
+
+---
+
+## Project Knowledge — Consult Before Acting
+
+Before implementing anything, read the relevant project docs. Priority order:
+
+1. `docs/01-project-brief.md` — project spine (overview, phases, decisions log)
+2. `docs/13-technical-architecture.md` — consolidated technical plan ⭐
+3. `docs/12-input-specification.md` — HAR-first input architecture ⭐
+4. `docs/14-analyzer-spec.md` — Process Analyzer (LLM-based) spec ⭐ (Phase 1)
+5. `docs/04-migration-rules-and-edge-cases.md` — 40+ numbered migration rules (MR-*)
+6. `docs/02-platform-differences.md` — v1 vs v2 deep comparison
+7. `docs/03-glossary.md` — v1↔v2 terminology mapping
+8. `docs/06-book-integration-mapping.csv` — ~90 v1 books → v2 integrations
+9. `docs/08-v2-api-spec.md` — REST + MCP endpoints
+10. `docs/09-autonomous-build-loop.md` — agent state machine
+11. `docs/10-test-plan-generation-spec.md` — test plan schema + prompt
+12. `docs/11-end-state-report-format.md` — migration report structure
+13. `docs/07-sample-process-template.md` — test data guidance
+14. `docs/05-parser-spec.md` — ⚠️ **DEPRECATED** (superseded by 14). Hand-written parser design; kept as historical reference + fallback only.
+
+`src/types/ir.ts` is the canonical `V1ProcessIR` schema. When docs and code disagree, the docs win — surface the discrepancy.
+
+---
+
+## Phase Awareness
+
+Know which phase you're in. Do not jump ahead.
+
+- **Phase 0 — Project Setup** — Next.js + TS + Tailwind scaffold, env vars, dashboard placeholder.
+- **Phase 0.5 — HAR Extractor** (`src/lib/har/`) — sanitize auth, extract processes, build call graph.
+- **Phase 1 — Process Analyzer (LLM-based)** (`src/lib/analyzer/`) — OpenAI GPT-4o + JSON mode + Zod validation + ONE corrective retry + deterministic metadata stamping. Takes `ExtractedProcess.text` + call-graph context → `V1ProcessIR`. Book→integration mapping context is folded into the analyzer prompt (there is no separate Mapping Enricher phase).
+- **Phase 3 — SOP + Test Plan Generator** (`src/lib/sop/`) — Claude prompts + Zod validation.
+- **Phase 4 — Connection Setup UI** — human-in-loop OAuth; verify Connections via v2 REST.
+- **Phase 5 — Autonomous Agent** (`src/lib/agent/`) — XState machine; create/test/publish via MCP + REST.
+- **Phase 6 — Report Generator** (`src/lib/report/`) — JSON/MD/HTML migration report.
+- **Phase 7 — Polish + Testing** — E2E, performance, UX, docs.
+
+(Phase 2 — Mapping Enricher — was folded into Phase 1. Phase numbers are otherwise unchanged.)
+
+---
+
+## Decision Protocol
+
+1. Check the relevant doc(s) above for the answer first.
+2. If the docs answer it, follow the docs.
+3. If the docs are silent or ambiguous, make a reasonable decision and note it; record significant choices in the brief's Decisions Log.
+4. For scope changes or destructive actions, surface the issue before acting.
+
+---
+
+## Hard Rules
+
+1. **TypeScript strict throughout.** No `any`. Every exported symbol documented.
+2. **HAR sanitization is mandatory and security-critical.** No auth headers may persist to storage; tests must verify this.
+3. **No PII in logs, storage, or reports.** Flag and strip sensitive content.
+4. **Validate all LLM / API-boundary output with Zod.** Reject and (where specified) retry; never trust raw model JSON.
+5. **`src/types/ir.ts` is canonical** for the IR. Keep `src/lib/analyzer/schema.ts` structurally identical (drift caught at compile time).
+6. **Use v2 terminology in user-facing output** (Workspace, Automation, Connection, Integration, Guidance Center) per `docs/03-glossary.md`.
+7. **Migrate processes in topological order** (leaves first) per MR-44; preserve `procedureId` on HAR refs (MR-43).
+8. **Analyzer metadata is stamped deterministically by code** (`parsedAt`, `sourceLineCount`, `parserVersion`) — never trust the model's metadata block.
+9. **NEVER add a hand-written DSL parser.** The analyzer (LLM-based) is the chosen approach. If LLM output proves insufficient, surface the issue and propose iteration — don't silently switch to parsing.
