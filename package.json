@@ -12,12 +12,18 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
+    "@supabase/supabase-js": "^2.107.0",
     "@vercel/blob": "^1.1.1",
     "@vercel/kv": "^3.0.0",
+    "@xyflow/react": "^12.11.0",
+    "lucide-react": "^1.17.0",
     "next": "15.5.19",
     "openai": "^6.41.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-dropzone": "^15.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "xstate": "^5.20.1",
     "zod": "^3.25.76"
   },

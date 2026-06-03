@@ -196,6 +196,7 @@ EXTERNAL APIS
 | 13 | Parser approach? | Replaced hand-written parser with LLM analyzer (OpenAI GPT-4o + Zod); dropped build time from ~5 weeks to ~3 weeks | Jun 2026 |
 | 14 | LLM provider? | OpenAI GPT-4o (had OpenAI key; analyzer is provider-agnostic) | Jun 2026 |
 | 15 | Mapping enricher (Phase 2)? | Folded into analyzer prompt context (not a separate phase); helped cut the estimate to ~3 weeks | Jun 2026 |
+| 16 | Prod persistence backend? | **Supabase (Postgres)** instead of Vercel KV (supersedes #9); pluggable `MigrationStore` keeps SQLite for local dev. Apply `supabase/schema.sql`; set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Jun 2026 |
 
 ---
 

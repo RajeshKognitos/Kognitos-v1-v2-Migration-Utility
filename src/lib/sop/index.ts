@@ -32,6 +32,7 @@ export type {
   BundleSopResult,
   BundleSopError,
   GenerateBundleSopsOptions,
+  SopProgressEvent,
 } from './orchestrator';
 export type {
   TestPlan,

@@ -55,12 +55,29 @@ export interface BundleSopResult {
   errors: BundleSopError[];
 }
 
+/**
+ * A progress event emitted as the bundle's SOPs are generated (for streaming
+ * UI). Mirrors the analyzer's {@link import('@/lib/analyzer/orchestrator').ProgressEvent}.
+ */
+export interface SopProgressEvent {
+  /** Lifecycle phase this event represents. */
+  type: 'started' | 'process_complete' | 'process_error';
+  /** The procedure this event concerns. */
+  procedureId: string;
+  /** Wall-clock duration of the SOP generation, for `process_complete`. */
+  durationMs?: number;
+  /** Error message, for `process_error`. */
+  error?: string;
+}
+
 /** Options for {@link generateBundleSops}. */
 export interface GenerateBundleSopsOptions {
   /** Max number of SOPs generated in parallel. Defaults to 3. */
   concurrency?: number;
   /** Token pricing (USD per 1M). Defaults to the analyzer's GPT-4o rates. */
   costRates?: { inputPerM: number; outputPerM: number };
+  /** Callback invoked for every {@link SopProgressEvent}. */
+  onProgress?: (event: SopProgressEvent) => void;
 }
 
 /**
@@ -124,6 +141,7 @@ export async function generateBundleSops(
 ): Promise<BundleSopResult> {
   const concurrency = opts.concurrency ?? 3;
   const costRates = opts.costRates ?? DEFAULT_COST_RATES;
+  const emit = opts.onProgress ?? ((): void => {});
 
   const nameById = new Map(
     analyzedBundle.callGraph.nodes.map((n) => [n.id, n.name]),
@@ -149,14 +167,18 @@ export async function generateBundleSops(
     const procedureName =
       nameById.get(id) ?? ir.procedures[0]?.name ?? id;
 
+    emit({ type: 'started', procedureId: id });
+
     const startedAt = Date.now();
     try {
       const result = await generateSopAndTestPlan(ir, { bundleSummary });
-      perProcessMs.set(id, Date.now() - startedAt);
+      const durationMs = Date.now() - startedAt;
+      perProcessMs.set(id, durationMs);
       sops.set(id, result);
       mergeConnections(connections, result.connectionRequirements);
       totalInput += result.metadata.tokensUsed.input;
       totalOutput += result.metadata.tokensUsed.output;
+      emit({ type: 'process_complete', procedureId: id, durationMs });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       perProcessMs.set(id, Date.now() - startedAt);
@@ -164,6 +186,7 @@ export async function generateBundleSops(
       console.error(
         `[sop-orchestrator] failed to generate SOP for "${procedureName}" (${id}): ${message}`,
       );
+      emit({ type: 'process_error', procedureId: id, error: message });
     }
   });
 
