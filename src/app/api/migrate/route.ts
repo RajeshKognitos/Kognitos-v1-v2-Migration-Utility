@@ -33,9 +33,10 @@ import type { MigrationEvent, MigrationStage } from '@/lib/sse-client';
 
 // The pipeline calls OpenAI + node:crypto, so it must run on the Node runtime.
 export const runtime = 'nodejs';
-// 13-min ceiling: analyze (~6 min) + SOP generation for a multi-process bundle.
-// Needs a Pro plan on Vercel; runs fine locally.
-export const maxDuration = 800;
+// Hobby plan hard-caps maxDuration at 300s; Pro/Fluid Compute allows up to 800.
+// NOTE: a full multi-process pipeline (analyze ~6 min + SOP gen) exceeds 300s, so
+// large bundles WILL be cut off mid-run on Hobby. Locally there is no such cap.
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 const MAX_HAR_BYTES = 100 * 1024 * 1024;
