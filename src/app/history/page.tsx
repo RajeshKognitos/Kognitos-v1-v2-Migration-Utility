@@ -7,18 +7,10 @@
  */
 
 import Link from 'next/link';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Coins,
-  FileArchive,
-  GitBranch,
-  Loader2,
-  Plug,
-} from 'lucide-react';
+import { ArrowLeft, FileArchive } from 'lucide-react';
 
+import { HistoryRow } from '@/components/history/HistoryRow';
 import { listResults } from '@/lib/migration/store';
-import type { MigrationSummary } from '@/lib/migration/persistence';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,76 +60,6 @@ export default async function HistoryPage(): Promise<React.JSX.Element> {
   );
 }
 
-function HistoryRow({
-  migration,
-}: {
-  migration: MigrationSummary;
-}): React.JSX.Element {
-  const running = migration.status === 'running';
-  return (
-    <Link
-      href={`/migration/${migration.id}`}
-      className="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
-    >
-      <span
-        className={[
-          'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg',
-          running ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600',
-        ].join(' ')}
-      >
-        {running ? (
-          <Loader2 className="h-5 w-5 animate-spin" />
-        ) : (
-          <FileArchive className="h-5 w-5" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium text-neutral-900">
-          {migration.harFilename}
-        </p>
-        <p className="text-xs text-neutral-400">
-          {formatDate(migration.createdAt)}
-        </p>
-      </div>
-      {running ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Running
-        </span>
-      ) : (
-        <div className="hidden items-center gap-5 text-sm text-neutral-500 sm:flex">
-          <Stat icon={<GitBranch className="h-4 w-4" />} value={migration.processCount} label="processes" />
-          <Stat icon={<Plug className="h-4 w-4" />} value={migration.connectionCount} label="connections" />
-          <Stat
-            icon={<AlertTriangle className="h-4 w-4" />}
-            value={migration.flagCount}
-            label="flags"
-          />
-          <Stat icon={<Coins className="h-4 w-4" />} value={`$${migration.totalCostUsd.toFixed(2)}`} label="" />
-        </div>
-      )}
-    </Link>
-  );
-}
-
-function Stat({
-  icon,
-  value,
-  label,
-}: {
-  icon: React.ReactNode;
-  value: number | string;
-  label: string;
-}): React.JSX.Element {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {icon}
-      <span className="font-medium text-neutral-700">{value}</span>
-      {label && <span className="text-neutral-400">{label}</span>}
-    </span>
-  );
-}
-
 function EmptyState(): React.JSX.Element {
   return (
     <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-white px-6 py-16 text-center">
@@ -159,16 +81,4 @@ function EmptyState(): React.JSX.Element {
       </Link>
     </div>
   );
-}
-
-/** Format an ISO timestamp as a readable absolute date/time. */
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
