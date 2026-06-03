@@ -72,7 +72,7 @@ export function ConnectionChecklist({
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-medium text-neutral-900">{conn.integration}</p>
                   <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">
-                    {count} process{count === 1 ? '' : 'es'}
+                    {count} business process{count === 1 ? '' : 'es'}
                   </span>
                   {conn.isCustomActionsIntegration && (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">

@@ -14,7 +14,7 @@ import type {
   ExtractionWarning,
 } from '@/lib/har';
 import type { V1ProcessIR } from '@/types/ir';
-import type { ConnectionRequirement, SopGenerationResult } from '@/types/sop';
+import type { ConnectionRequirement, GroupSopResult } from '@/types/sop';
 
 /** Aggregated token usage + computed USD cost for one pipeline stage. */
 export interface StageTokenUsage {
@@ -26,12 +26,22 @@ export interface StageTokenUsage {
   totalCostUsd: number;
 }
 
-/** A per-process failure surfaced from one of the orchestrators. */
+/** A per-process failure surfaced from the analyzer. */
 export interface StageError {
   /** Procedure ID that failed. */
   procedureId: string;
   /** Human-readable procedure name. */
   procedureName: string;
+  /** The failure message. */
+  error: string;
+}
+
+/** A per-group failure surfaced from the SOP orchestrator. */
+export interface GroupStageError {
+  /** Group id that failed. */
+  groupId: string;
+  /** Entry-point process name of the failed group. */
+  entryName: string;
   /** The failure message. */
   error: string;
 }
@@ -63,16 +73,16 @@ export interface MigrationResult {
     /** Per-process analysis duration (ms), keyed by `procedureId`. */
     perProcessMs: Record<string, number>;
   };
-  /** Phase 3 SOP + test-plan output. */
+  /** Phase 3 SOP + test-plan output (one consolidated SOP per process group). */
   sop: {
     tokenUsage: StageTokenUsage;
     totalMs: number;
-    errors: StageError[];
-    /** SOP results keyed by `procedureId`. */
-    sopsById: Record<string, SopGenerationResult>;
-    /** Per-process SOP duration (ms), keyed by `procedureId`. */
-    perProcessMs: Record<string, number>;
-    /** Deduplicated v2 Connection requirements across all processes. */
+    errors: GroupStageError[];
+    /** Consolidated SOP results, one per connected process group. */
+    groups: GroupSopResult[];
+    /** Per-group SOP duration (ms), keyed by `groupId`. */
+    perGroupMs: Record<string, number>;
+    /** Deduplicated v2 Connection requirements across all groups. */
     aggregatedConnections: ConnectionRequirement[];
   };
 }
@@ -103,8 +113,8 @@ export type MigrationEvent =
   | { type: 'sop_started'; total: number }
   | {
       type: 'sop_progress';
-      procedureId: string;
-      procedureName: string;
+      groupId: string;
+      entryName: string;
       durationMs: number;
       completed: number;
       total: number;

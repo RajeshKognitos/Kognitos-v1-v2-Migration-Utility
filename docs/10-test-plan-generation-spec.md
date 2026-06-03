@@ -1,6 +1,18 @@
 # Test Plan Generation Spec
 
-> How Claude generates a structured test plan alongside the SOP, and how the agent consumes it.
+> How the generator produces a structured test plan alongside the SOP, and how the agent consumes it.
+
+---
+
+> **Update (Jun 2026) — consolidated, per-group test plans.** As of Decision #17,
+> the SOP + test plan are generated **per connected process-group** (a
+> weakly-connected component of the call graph), not per process. Each group
+> yields **one end-to-end test plan** driven by the group's **entry-point**
+> process: `testPlan.processName` is the entry business-process name, and the
+> cases exercise the full flow through its sub-tasks. Disconnected processes form
+> singleton groups (an individual plan each). Integration coverage spans **every**
+> book/integration used **anywhere in the group**. The schema below is unchanged;
+> only the unit (one plan per group) and the entry-point framing are new.
 
 ---
 

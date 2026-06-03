@@ -88,8 +88,8 @@ export function serializeMigrationResult(
       tokenUsage: sop.tokenUsage,
       totalMs: sop.timings.totalMs,
       errors: sop.errors,
-      sopsById: Object.fromEntries(sop.sops),
-      perProcessMs: Object.fromEntries(sop.timings.perProcessMs),
+      groups: sop.groups,
+      perGroupMs: Object.fromEntries(sop.timings.perGroupMs),
       aggregatedConnections: sop.aggregatedConnections,
     },
   };

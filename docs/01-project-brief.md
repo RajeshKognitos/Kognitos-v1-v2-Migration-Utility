@@ -197,6 +197,7 @@ EXTERNAL APIS
 | 14 | LLM provider? | OpenAI GPT-4o (had OpenAI key; analyzer is provider-agnostic) | Jun 2026 |
 | 15 | Mapping enricher (Phase 2)? | Folded into analyzer prompt context (not a separate phase); helped cut the estimate to ~3 weeks | Jun 2026 |
 | 16 | Prod persistence backend? | **Supabase (Postgres)** instead of Vercel KV (supersedes #9); pluggable `MigrationStore` keeps SQLite for local dev. Apply `supabase/schema.sql`; set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Jun 2026 |
+| 17 | SOP unit of generation? | **Per connected process-group, not per process.** Weakly-connected components of the call graph collapse parent-child processes into ONE consolidated business SOP (Objective/Scope/Triggers/Roles/Rules/Procedure with sub-tasks as subsections) + ONE end-to-end, entry-point-driven test plan; disconnected processes get an individual SOP. A new "Business Processes" hierarchy view renders each group's tree + consolidated SOP | Jun 2026 |
 
 ---
 

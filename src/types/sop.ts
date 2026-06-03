@@ -179,3 +179,29 @@ export interface SopGenerationMetadata {
   /** Token usage (summed across the first attempt and optional retry). */
   tokensUsed: { input: number; output: number };
 }
+
+// ============================================================
+// Consolidated, per-group SOP (Phase 3 — connected-component unit)
+// ============================================================
+
+/**
+ * Whether a group's SOP describes a multi-process business flow
+ * (`consolidated`) or a single disconnected process (`individual`).
+ */
+export type ProcessGroupKind = 'consolidated' | 'individual';
+
+/**
+ * The SOP + test plan + connections for one process group (a connected set of
+ * parent-child processes). Extends {@link SopGenerationResult} with the
+ * code-stamped group identity (never trusted from the model).
+ */
+export interface GroupSopResult extends SopGenerationResult {
+  /** Stable group id (from the call-graph component). */
+  groupId: string;
+  /** Consolidated (multi-process) vs individual (singleton). */
+  kind: ProcessGroupKind;
+  /** Every process id covered by this consolidated SOP. */
+  memberProcedureIds: string[];
+  /** Display name of the entry-point (root) process driving the flow. */
+  entryProcedureName: string;
+}

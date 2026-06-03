@@ -3,8 +3,8 @@
  * test plans (real OpenAI). Prints a per-process analyzer summary and a second
  * SOP summary, then writes:
  *   - /tmp/analyzed-bundle.json      full AnalyzedBundle (Phase 1)
- *   - /tmp/sops/{name}.md            one SOP per process (Phase 3)
- *   - /tmp/sops/{name}.testplan.json one test plan per process (Phase 3)
+ *   - /tmp/sops/{name}.md            one consolidated SOP per process group (Phase 3)
+ *   - /tmp/sops/{name}.testplan.json one end-to-end test plan per group (Phase 3)
  *   - /tmp/sop-bundle.json           full BundleSopResult (Phase 3)
  *   - /tmp/connection-checklist.json deduplicated v2 Connection requirements
  * Run: OPENAI_API_KEY=sk-... npx tsx scripts/demo.ts
@@ -100,31 +100,27 @@ async function main(): Promise<void> {
   writeFileSync(OUT, JSON.stringify(result, replacer, 2), 'utf8');
   console.log(c.dim(`\nFull AnalyzedBundle → ${OUT}`));
 
-  // ── Phase 3: SOP + test-plan generation ──────────────────────────────────
-  console.log(c.dim('\nGenerating SOPs + test plans…\n'));
-  const sopResult = await generateBundleSops(result);
+  // ── Phase 3: consolidated SOP + test-plan generation (one per group) ──────
+  console.log(c.dim('\nGenerating consolidated business SOPs + test plans…\n'));
+  const ownersById = new Map(bundle.processes.map((p) => [p.id, p.owner]));
+  const sopResult = await generateBundleSops(result, { ownersById });
 
   mkdirSync(SOP_DIR, { recursive: true });
 
-  const sopHeader = `${pad('Process', 40)} ${pad('SOP chars', 10)} ${pad('Tests', 6)} ${pad('Conns', 6)}`;
+  const sopHeader = `${pad('Business process', 40)} ${pad('Members', 8)} ${pad('SOP chars', 10)} ${pad('Tests', 6)} ${pad('Conns', 6)}`;
   console.log(c.bold(sopHeader));
   console.log(c.dim('-'.repeat(sopHeader.length)));
 
-  for (const proc of bundle.processes) {
-    const sop = sopResult.sops.get(proc.id);
-    if (!sop) {
-      console.log(`${pad(proc.name, 40)} ${c.red('(no SOP generated)')}`);
-      continue;
-    }
-    const stem = sanitize(proc.name);
-    writeFileSync(`${SOP_DIR}/${stem}.md`, sop.sop, 'utf8');
+  for (const group of sopResult.groups) {
+    const stem = sanitize(group.entryProcedureName);
+    writeFileSync(`${SOP_DIR}/${stem}.md`, group.sop, 'utf8');
     writeFileSync(
       `${SOP_DIR}/${stem}.testplan.json`,
-      JSON.stringify(sop.testPlan, null, 2),
+      JSON.stringify(group.testPlan, null, 2),
       'utf8',
     );
     console.log(
-      `${c.cyan(pad(proc.name, 40))} ${pad(String(sop.sop.length), 10)} ${pad(String(sop.testPlan.testCases.length), 6)} ${pad(String(sop.connectionRequirements.length), 6)}`,
+      `${c.cyan(pad(group.entryProcedureName, 40))} ${pad(String(group.memberProcedureIds.length), 8)} ${pad(String(group.sop.length), 10)} ${pad(String(group.testPlan.testCases.length), 6)} ${pad(String(group.connectionRequirements.length), 6)}`,
     );
   }
 
@@ -156,7 +152,7 @@ async function main(): Promise<void> {
     console.log(c.red(`  ✗ [analyze] ${e.procedureName} (${e.procedureId}): ${e.error}`));
   }
   for (const e of sopResult.errors) {
-    console.log(c.red(`  ✗ [sop] ${e.procedureName} (${e.procedureId}): ${e.error}`));
+    console.log(c.red(`  ✗ [sop] ${e.entryName} (${e.groupId}): ${e.error}`));
   }
 }
 

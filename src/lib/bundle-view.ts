@@ -1,17 +1,28 @@
 /**
- * View-model derivation for the bundle viewer (Phase 3.5).
+ * View-model derivation for the bundle viewer (Phase 3.5+).
  *
- * Pure functions that flatten a {@link MigrationResult} into per-process
- * `ProcessView`s the UI renders directly — books used, subprocess count, flag
- * list, call-graph role, plus the attached IR + SOP. Keeps the IR-walking logic
- * in one place instead of duplicated across components.
+ * Pure functions that flatten a {@link MigrationResult} into:
+ *  - per-process `ProcessView`s (cards, call-graph nodes, detail drawer), each
+ *    linked to the consolidated SOP of the group it belongs to; and
+ *  - per-group `GroupView`s (the new "Business Processes" tab): the parent-child
+ *    hierarchy plus the one consolidated SOP / test plan / connections.
+ *
+ * Grouping helpers are imported directly from `@/lib/sop/grouping` (a pure,
+ * type-only-dependency module) to keep the server-only OpenAI client out of the
+ * client bundle.
  *
  * Strict TS, no `any`.
  */
 
 import type { Flag, StatementIR, V1ProcessIR } from '@/types/ir';
-import type { ConnectionRequirement, SopGenerationResult } from '@/types/sop';
+import type { ConnectionRequirement, GroupSopResult } from '@/types/sop';
 import type { MigrationResult } from '@/lib/sse-client';
+import {
+  buildHierarchyForest,
+  groupByComponent,
+  type HierarchyNode,
+  type ProcessGroup,
+} from '@/lib/sop/grouping';
 
 /** A process's call-graph role, used for node/border coloring. */
 export type ProcessRole = 'root' | 'leaf' | 'intermediate';
@@ -33,12 +44,38 @@ export interface ProcessView {
   flags: Flag[];
   /** Call-graph role. */
   role: ProcessRole;
+  /** Id of the process group this process belongs to. */
+  groupId: string;
+  /** True when this process is the entry-point of its group. */
+  isGroupEntry: boolean;
   /** Analyzer IR, if analysis succeeded for this process. */
   ir?: V1ProcessIR;
-  /** SOP + test plan + connections, if generation succeeded. */
-  sop?: SopGenerationResult;
-  /** True if analysis or SOP generation failed for this process. */
+  /** The consolidated SOP of the group this process belongs to, if generated. */
+  group?: GroupSopResult;
+  /** True if analysis failed for this process or its group's SOP failed. */
   failed: boolean;
+}
+
+/** Everything the UI needs to render one business-process (group) card. */
+export interface GroupView {
+  /** Stable group id. */
+  groupId: string;
+  /** Entry-point (business process) display name. */
+  entryName: string;
+  /** Consolidated (multi-process) vs individual (singleton). */
+  kind: 'consolidated' | 'individual';
+  /** Number of processes in the group. */
+  memberCount: number;
+  /** Parent-child hierarchy forest (rooted at the entry points). */
+  forest: HierarchyNode[];
+  /** The member process views, leaves-first. */
+  members: ProcessView[];
+  /** The consolidated SOP + test plan + connections, if generation succeeded. */
+  sop?: GroupSopResult;
+  /** True when SOP generation failed for this group. */
+  failed: boolean;
+  /** Failure message, when `failed`. */
+  error?: string;
 }
 
 const SEVERITY_RANK: Record<Flag['severity'], number> = {
@@ -89,26 +126,44 @@ function flagsOf(ir: V1ProcessIR): Flag[] {
   );
 }
 
-function roleOf(
-  id: string,
-  result: MigrationResult,
-): ProcessRole {
+function roleOf(id: string, result: MigrationResult): ProcessRole {
   const { roots, leaves } = result.bundle.callGraph;
   if (roots.includes(id)) return 'root';
   if (leaves.includes(id)) return 'leaf';
   return 'intermediate';
 }
 
+/** Shared derivation: groups, the SOP-by-group map, and the failed-group set. */
+function deriveGroups(result: MigrationResult): {
+  groups: ProcessGroup[];
+  groupByProc: Map<string, ProcessGroup>;
+  sopByGroup: Map<string, GroupSopResult>;
+  failedGroups: Set<string>;
+} {
+  const groups = groupByComponent(result.bundle.callGraph);
+  const groupByProc = new Map<string, ProcessGroup>();
+  for (const group of groups) {
+    for (const id of group.memberIds) groupByProc.set(id, group);
+  }
+  // `groups` may be absent on results persisted before consolidated SOPs.
+  const sopGroups = result.sop.groups ?? [];
+  const sopByGroup = new Map(sopGroups.map((g) => [g.groupId, g]));
+  const failedGroups = new Set((result.sop.errors ?? []).map((e) => e.groupId));
+  return { groups, groupByProc, sopByGroup, failedGroups };
+}
+
 /** Build the ordered list of {@link ProcessView}s for a migration result. */
 export function buildProcessViews(result: MigrationResult): ProcessView[] {
-  const failedIds = new Set<string>([
-    ...result.analysis.errors.map((e) => e.procedureId),
-    ...result.sop.errors.map((e) => e.procedureId),
-  ]);
+  const analysisFailed = new Set<string>(
+    result.analysis.errors.map((e) => e.procedureId),
+  );
+  const { groupByProc, sopByGroup, failedGroups } = deriveGroups(result);
 
   return result.bundle.processes.map((proc) => {
     const ir = result.analysis.irsById[proc.id];
-    const sop = result.sop.sopsById[proc.id];
+    const group = groupByProc.get(proc.id);
+    const groupId = group?.groupId ?? `grp:${proc.id}`;
+    const sop = sopByGroup.get(groupId);
     return {
       id: proc.id,
       name: proc.name,
@@ -117,14 +172,50 @@ export function buildProcessViews(result: MigrationResult): ProcessView[] {
       lineCount: proc.lineCount,
       source: proc.text,
       books: ir ? booksOf(ir) : [],
-      subprocessCount: ir
-        ? subprocessCountOf(ir)
-        : proc.subprocessRefs.length,
+      subprocessCount: ir ? subprocessCountOf(ir) : proc.subprocessRefs.length,
       flags: ir ? flagsOf(ir) : [],
       role: roleOf(proc.id, result),
+      groupId,
+      isGroupEntry: group ? group.entryIds.includes(proc.id) : true,
       ir,
+      group: sop,
+      failed: analysisFailed.has(proc.id) || failedGroups.has(groupId),
+    };
+  });
+}
+
+/** Build the per-group {@link GroupView}s for the Business Processes tab. */
+export function buildGroupViews(result: MigrationResult): GroupView[] {
+  const { groups, sopByGroup, failedGroups } = deriveGroups(result);
+  const nameById = new Map(
+    result.bundle.callGraph.nodes.map((n) => [n.id, n.name]),
+  );
+  const processViews = new Map(
+    buildProcessViews(result).map((p) => [p.id, p]),
+  );
+  const errorByGroup = new Map(
+    (result.sop.errors ?? []).map((e) => [e.groupId, e.error]),
+  );
+
+  return groups.map((group) => {
+    const sop = sopByGroup.get(group.groupId);
+    const entryName =
+      sop?.entryProcedureName ??
+      nameById.get(group.entryIds[0]) ??
+      group.entryIds[0];
+    const members = group.orderedMemberIds
+      .map((id) => processViews.get(id))
+      .filter((p): p is ProcessView => p !== undefined);
+    return {
+      groupId: group.groupId,
+      entryName,
+      kind: group.isSingleton ? 'individual' : 'consolidated',
+      memberCount: group.memberIds.length,
+      forest: buildHierarchyForest(group, result.bundle.callGraph, nameById),
+      members,
       sop,
-      failed: failedIds.has(proc.id),
+      failed: failedGroups.has(group.groupId) || !sop,
+      error: errorByGroup.get(group.groupId),
     };
   });
 }
@@ -137,16 +228,16 @@ export function flagBorderClass(flagCount: number): string {
 }
 
 /**
- * How many distinct processes reference each aggregated connection (by the
- * integration name appearing in that process's own connection requirements).
+ * How many business processes (groups) reference each aggregated connection
+ * (by the integration name appearing in that group's connection requirements).
  */
 export function connectionUsageCounts(
   result: MigrationResult,
 ): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const sop of Object.values(result.sop.sopsById)) {
+  for (const group of result.sop.groups ?? []) {
     const seen = new Set<string>();
-    for (const req of sop.connectionRequirements) {
+    for (const req of group.connectionRequirements) {
       const key = req.integration.trim().toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -157,4 +248,4 @@ export function connectionUsageCounts(
 }
 
 /** Re-export for convenience in components. */
-export type { ConnectionRequirement };
+export type { ConnectionRequirement, HierarchyNode };

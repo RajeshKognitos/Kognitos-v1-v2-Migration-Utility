@@ -16,12 +16,14 @@ import { beforeAll, describe, it, expect } from 'vitest';
 import { extractAgentBundleFromHar } from '@/lib/har';
 import { analyzeBundle } from '@/lib/analyzer/orchestrator';
 import {
-  buildSopSystemPrompt,
-  buildSopUserPrompt,
+  buildConsolidatedSopSystemPrompt,
+  buildGroupSopUserPrompt,
   generateBundleSops,
+  groupByComponent,
   SopModelOutputSchema,
 } from '@/lib/sop';
 import type { SopModelOutputValidated } from '@/lib/sop';
+import type { CallGraph } from '@/lib/har';
 import type { V1ProcessIR } from '@/types/ir';
 
 // ---------------------------------------------------------------------------
@@ -120,7 +122,7 @@ describe('SOP schema validation', () => {
 });
 
 describe('SOP prompt content', () => {
-  const system = buildSopSystemPrompt();
+  const system = buildConsolidatedSopSystemPrompt();
 
   it('declares the JSON output contract (sop + testPlan + connectionRequirements)', () => {
     expect(system).toContain('sop');
@@ -156,11 +158,23 @@ describe('SOP prompt content', () => {
     expect(system).toContain('ServiceNow');
   });
 
-  it('user prompt embeds the bundle summary and the IR JSON', () => {
-    const user = buildSopUserPrompt(EMPTY_IR, {
-      bundleSummary: 'part of a bundle of 3 process(es): "a", "b", "c".',
+  it('user prompt embeds the business-process name, hierarchy, and IR JSON', () => {
+    const callGraph: CallGraph = {
+      nodes: [{ id: 'p1', name: 'Send Approval Email' }],
+      edges: [],
+      roots: ['p1'],
+      leaves: ['p1'],
+      cycles: [],
+    };
+    const group = groupByComponent(callGraph)[0];
+    const user = buildGroupSopUserPrompt({
+      group,
+      irsById: new Map([['p1', EMPTY_IR]]),
+      nameById: new Map([['p1', 'Send Approval Email']]),
+      callGraph,
     });
-    expect(user).toContain('bundle of 3');
+    expect(user).toContain('Send Approval Email');
+    expect(user).toContain('Call hierarchy');
     expect(user).toContain('<ir>');
     expect(user).toContain('"procedures"');
   });
@@ -187,25 +201,33 @@ describe.skipIf(!RUN)('generateBundleSops — vendor helpdesk bundle (real OpenA
     const analyzed = await analyzeBundle(bundle);
     result = await generateBundleSops(analyzed);
 
-    console.log('\n[sop integration] per-process timing:');
-    for (const [id, ms] of result.timings.perProcessMs) {
+    console.log('\n[sop integration] per-group timing:');
+    for (const [id, ms] of result.timings.perGroupMs) {
       console.log(`  ${(ms / 1000).toFixed(1)}s  ${id}`);
     }
     console.log(
-      `[sop integration] total: ${(result.timings.totalMs / 1000).toFixed(1)}s, ` +
+      `[sop integration] groups: ${result.groups.length}, ` +
+        `total: ${(result.timings.totalMs / 1000).toFixed(1)}s, ` +
         `cost: $${result.tokenUsage.totalCostUsd.toFixed(4)}, ` +
         `connections: ${result.aggregatedConnections.map((c) => c.integration).join(', ')}`,
     );
   }, 1_200_000);
 
-  it('generates an SOP for all 7 processes with no errors', () => {
+  it('generates consolidated SOPs covering all 7 processes with no errors', () => {
     expect(result.errors).toHaveLength(0);
-    expect(result.sops.size).toBe(7);
+    expect(result.groups.length).toBeGreaterThanOrEqual(1);
+    const covered = new Set(
+      result.groups.flatMap((g) => g.memberProcedureIds),
+    );
+    expect(covered.size).toBe(7);
   });
 
-  it('every SOP has a non-empty sop string', () => {
-    for (const [id, sop] of result.sops) {
-      expect(sop.sop.trim().length, `empty SOP for ${id}`).toBeGreaterThan(0);
+  it('every consolidated SOP has a non-empty sop string', () => {
+    for (const group of result.groups) {
+      expect(
+        group.sop.trim().length,
+        `empty SOP for ${group.groupId}`,
+      ).toBeGreaterThan(0);
     }
   });
 
@@ -219,7 +241,7 @@ describe.skipIf(!RUN)('generateBundleSops — vendor helpdesk bundle (real OpenA
 
   it('at least one test plan has 3+ test cases', () => {
     const max = Math.max(
-      ...[...result.sops.values()].map((s) => s.testPlan.testCases.length),
+      ...result.groups.map((g) => g.testPlan.testCases.length),
     );
     expect(max).toBeGreaterThanOrEqual(3);
   });

@@ -41,7 +41,7 @@ interface StageMeta {
 const STAGES: StageMeta[] = [
   { key: 'extract', label: 'Extract', icon: <FileArchive className="h-5 w-5" />, verb: 'Extracting' },
   { key: 'analyze', label: 'Analyze', icon: <Cpu className="h-5 w-5" />, verb: 'Analyzing' },
-  { key: 'sop', label: 'Generate SOPs', icon: <FileText className="h-5 w-5" />, verb: 'Generating' },
+  { key: 'sop', label: 'Business SOPs', icon: <FileText className="h-5 w-5" />, verb: 'Generating' },
 ];
 
 export function PipelineProgress(props: PipelineProgressProps): React.JSX.Element {

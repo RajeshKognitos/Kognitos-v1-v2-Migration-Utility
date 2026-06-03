@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 
 import { BundleViewer } from '@/components/bundle/BundleViewer';
+import { ActivityLog, type LogEntry, type LogLevel } from '@/components/progress/ActivityLog';
 import {
   PipelineProgress,
   type StageState,
@@ -53,12 +54,19 @@ const INITIAL_STAGES: Stages = {
   sop: { ...PENDING },
 };
 
-/** All three stages complete with the same process count (for rehydration). */
-const allComplete = (count: number): Stages => ({
-  extract: { status: 'complete', completed: count, total: count },
-  analyze: { status: 'complete', completed: count, total: count },
-  sop: { status: 'complete', completed: count, total: count },
-});
+/**
+ * All stages complete (for rehydration). Extract/analyze count processes; the
+ * SOP stage counts business-process groups (one consolidated SOP each).
+ */
+const completedStages = (stored: MigrationResult): Stages => {
+  const procs = stored.bundle.processCount;
+  const groups = stored.sop.groups?.length ?? procs;
+  return {
+    extract: { status: 'complete', completed: procs, total: procs },
+    analyze: { status: 'complete', completed: procs, total: procs },
+    sop: { status: 'complete', completed: groups, total: groups },
+  };
+};
 
 export default function MigrationPage(): React.JSX.Element {
   const params = useParams<{ id: string }>();
@@ -70,10 +78,19 @@ export default function MigrationPage(): React.JSX.Element {
   const [error, setError] = useState<{ stage: MigrationStage; message: string } | null>(
     null,
   );
+  const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Held across retries; the pending-upload handoff is one-shot.
   const fileRef = useRef<File | null>(null);
   const startedRef = useRef(false);
+  const logSeq = useRef(0);
+
+  const pushLog = useCallback((level: LogLevel, message: string): void => {
+    setLogs((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${(logSeq.current += 1)}`, ts: Date.now(), level, message },
+    ]);
+  }, []);
 
   const run = useCallback(
     async (file: File): Promise<void> => {
@@ -85,6 +102,8 @@ export default function MigrationPage(): React.JSX.Element {
       });
       setError(null);
       setResult(null);
+      setLogs([]);
+      pushLog('info', 'Uploading HAR and starting the migration pipeline\u2026');
 
       const body = new FormData();
       body.append('file', file);
@@ -117,6 +136,7 @@ export default function MigrationPage(): React.JSX.Element {
           switch (event.type) {
             case 'extract_started':
               setStages((s) => ({ ...s, extract: { status: 'active', completed: 0, total: 0 } }));
+              pushLog('info', 'Extracting processes from the HAR\u2026');
               break;
             case 'extract_complete':
               setStages((s) => ({
@@ -127,24 +147,36 @@ export default function MigrationPage(): React.JSX.Element {
                   total: event.processCount,
                 },
               }));
+              pushLog(
+                'success',
+                `Extracted ${event.processCount} process${event.processCount === 1 ? '' : 'es'}` +
+                  (event.books.length > 0 ? ` \u00b7 books: ${event.books.join(', ')}` : ''),
+              );
               break;
             case 'analyze_started':
               setStages((s) => ({
                 ...s,
                 analyze: { status: 'active', completed: 0, total: event.total },
               }));
+              pushLog('info', `Analyzing ${event.total} process${event.total === 1 ? '' : 'es'} into IR\u2026`);
               break;
             case 'analyze_progress':
               setStages((s) => ({
                 ...s,
                 analyze: { status: 'active', completed: event.completed, total: event.total },
               }));
+              pushLog(
+                event.failed ? 'error' : 'success',
+                `${event.failed ? 'Failed to analyze' : 'Analyzed'} "${event.procedureName}" ` +
+                  `(${secs(event.durationMs)}) \u2014 ${event.completed}/${event.total}`,
+              );
               break;
             case 'analyze_complete':
               setStages((s) => ({
                 ...s,
                 analyze: { ...s.analyze, status: 'complete', completed: s.analyze.total },
               }));
+              pushLog('success', `Analysis complete (${secs(event.totalMs)})`);
               pastAnalyze = true;
               break;
             case 'sop_started':
@@ -152,29 +184,45 @@ export default function MigrationPage(): React.JSX.Element {
                 ...s,
                 sop: { status: 'active', completed: 0, total: event.total },
               }));
+              pushLog(
+                'info',
+                `Grouped into ${event.total} business process${event.total === 1 ? '' : 'es'}; generating consolidated SOPs\u2026`,
+              );
               break;
             case 'sop_progress':
               setStages((s) => ({
                 ...s,
                 sop: { status: 'active', completed: event.completed, total: event.total },
               }));
+              pushLog(
+                event.failed ? 'error' : 'success',
+                `${event.failed ? 'SOP failed for' : 'SOP ready for'} "${event.entryName}" ` +
+                  `(${secs(event.durationMs)}) \u2014 ${event.completed}/${event.total}`,
+              );
               break;
             case 'sop_complete':
               setStages((s) => ({
                 ...s,
                 sop: { ...s.sop, status: 'complete', completed: s.sop.total },
               }));
+              pushLog('success', `SOP generation complete (${secs(event.totalMs)})`);
               break;
-            case 'done':
+            case 'done': {
               terminal = true;
               setResult(event.finalResult);
               setPhase('done');
+              const cost =
+                event.finalResult.analysis.tokenUsage.totalCostUsd +
+                event.finalResult.sop.tokenUsage.totalCostUsd;
+              pushLog('success', `Migration complete \u00b7 $${cost.toFixed(4)}`);
               break;
+            }
             case 'error':
               terminal = true;
               setError({ stage: event.stage, message: event.message });
               setStages((s) => ({ ...s, [event.stage]: { ...s[event.stage], status: 'error' } }));
               setPhase('error');
+              pushLog('error', `Failed during ${stageLabel(event.stage)}: ${event.message}`);
               break;
           }
         }
@@ -183,9 +231,11 @@ export default function MigrationPage(): React.JSX.Element {
         // (or soon will be) persisted — switch to the polling state.
         if (!terminal) {
           if (pastAnalyze) {
+            pushLog('muted', 'Live connection ended — polling for the saved result\u2026');
             setPhase('disconnected');
           } else {
             setError({ stage: 'analyze', message: 'The migration stream ended early.' });
+            pushLog('error', 'The migration stream ended early.');
             setPhase('error');
           }
         }
@@ -194,14 +244,16 @@ export default function MigrationPage(): React.JSX.Element {
         // to completion, so don't offer "Retry" (that double-bills) — poll for
         // the persisted result instead.
         if (pastAnalyze) {
+          pushLog('muted', 'Live connection dropped — polling for the saved result\u2026');
           setPhase('disconnected');
         } else {
           setError({ stage: 'analyze', message: 'The migration stream was interrupted.' });
+          pushLog('error', 'The migration stream was interrupted.');
           setPhase('error');
         }
       }
     },
-    [id],
+    [id, pushLog],
   );
 
   // Fall back to a stored result when there's no in-memory file (e.g. refresh).
@@ -213,7 +265,8 @@ export default function MigrationPage(): React.JSX.Element {
       if (res.ok) {
         const stored = (await res.json()) as MigrationResult;
         setResult(stored);
-        setStages(allComplete(stored.bundle.processCount));
+        setStages(completedStages(stored));
+        setLogs([]);
         setPhase('done');
         return;
       }
@@ -230,6 +283,11 @@ export default function MigrationPage(): React.JSX.Element {
             analyze: { status: 'active', completed: 0, total: summary.processCount },
             sop: { ...PENDING },
           });
+          setLogs([]);
+          pushLog(
+            'muted',
+            'This migration is still running on the server (started in another session) — polling for the result\u2026',
+          );
           setPhase('disconnected');
           return;
         }
@@ -238,7 +296,7 @@ export default function MigrationPage(): React.JSX.Element {
     } catch {
       setPhase('missing');
     }
-  }, [id]);
+  }, [id, pushLog]);
 
   // Poll the persisted result; used while 'disconnected' (backend still running).
   const pollResult = useCallback(async (): Promise<boolean> => {
@@ -247,13 +305,14 @@ export default function MigrationPage(): React.JSX.Element {
       if (!res.ok) return false;
       const stored = (await res.json()) as MigrationResult;
       setResult(stored);
-      setStages(allComplete(stored.bundle.processCount));
+      setStages(completedStages(stored));
+      pushLog('success', 'Saved result is ready.');
       setPhase('done');
       return true;
     } catch {
       return false;
     }
-  }, [id]);
+  }, [id, pushLog]);
 
   useEffect(() => {
     if (startedRef.current) return;
@@ -307,6 +366,13 @@ export default function MigrationPage(): React.JSX.Element {
               analyze={stages.analyze}
               sop={stages.sop}
             />
+
+            {phase !== 'done' && logs.length > 0 && (
+              <ActivityLog
+                entries={logs}
+                active={phase === 'running' || phase === 'disconnected'}
+              />
+            )}
 
             {phase === 'disconnected' && (
               <div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
@@ -381,6 +447,11 @@ function stageLabel(stage: MigrationStage): string {
   if (stage === 'extract') return 'extraction';
   if (stage === 'analyze') return 'analysis';
   return 'SOP generation';
+}
+
+/** Format a millisecond duration as a compact seconds string. */
+function secs(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function MissingState(): React.JSX.Element {

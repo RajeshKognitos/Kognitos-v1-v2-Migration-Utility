@@ -3,27 +3,27 @@
 /**
  * Bundle viewer (Phase 3.5, FILE 6).
  *
- * Tabbed shell for a finished migration: Call Graph | Processes | Connections |
- * Cost (Processes is the default). Owns the {@link ProcessView} list and the
- * selected-process state that drives the shared {@link ProcessDetail} panel, so
- * clicking a node in the graph or a card in the list opens the same drawer.
+ * Tabbed shell for a finished migration: Business Processes | Processes |
+ * Connections | Cost (Business Processes is the default). The call graph now
+ * lives as a sub-tab inside each business-process card (scoped to that group),
+ * so there is no longer a global Call Graph tab. Owns the {@link ProcessView}
+ * list and the selected-process state that drives the shared
+ * {@link ProcessDetail} panel.
  */
 
 import { useMemo, useState } from 'react';
-import {
-  Coins,
-  GitBranch,
-  LayoutGrid,
-  Network,
-  Plug,
-} from 'lucide-react';
+import { Coins, GitBranch, LayoutGrid, Plug, Workflow } from 'lucide-react';
 
-import { CallGraphView } from '@/components/bundle/CallGraphView';
 import { ConnectionChecklist } from '@/components/bundle/ConnectionChecklist';
 import { CostSummary } from '@/components/bundle/CostSummary';
 import { ProcessDetail } from '@/components/bundle/ProcessDetail';
+import { ProcessGroupsView } from '@/components/bundle/ProcessGroupsView';
 import { ProcessList } from '@/components/bundle/ProcessList';
-import { buildProcessViews, type ProcessView } from '@/lib/bundle-view';
+import {
+  buildGroupViews,
+  buildProcessViews,
+  type ProcessView,
+} from '@/lib/bundle-view';
 import type { MigrationResult } from '@/lib/sse-client';
 
 /** Props for {@link BundleViewer}. */
@@ -31,7 +31,7 @@ export interface BundleViewerProps {
   result: MigrationResult;
 }
 
-type TabKey = 'graph' | 'processes' | 'connections' | 'cost';
+type TabKey = 'groups' | 'processes' | 'connections' | 'cost';
 
 interface TabMeta {
   key: TabKey;
@@ -40,13 +40,14 @@ interface TabMeta {
 }
 
 export function BundleViewer({ result }: BundleViewerProps): React.JSX.Element {
-  const [tab, setTab] = useState<TabKey>('processes');
+  const [tab, setTab] = useState<TabKey>('groups');
   const [selected, setSelected] = useState<ProcessView | null>(null);
 
   const processes = useMemo(() => buildProcessViews(result), [result]);
+  const groups = useMemo(() => buildGroupViews(result), [result]);
 
   const tabs: TabMeta[] = [
-    { key: 'graph', label: 'Call Graph', icon: <Network className="h-4 w-4" /> },
+    { key: 'groups', label: 'Business Processes', icon: <Workflow className="h-4 w-4" /> },
     { key: 'processes', label: 'Processes', icon: <LayoutGrid className="h-4 w-4" /> },
     { key: 'connections', label: 'Connections', icon: <Plug className="h-4 w-4" /> },
     { key: 'cost', label: 'Cost', icon: <Coins className="h-4 w-4" /> },
@@ -66,14 +67,15 @@ export function BundleViewer({ result }: BundleViewerProps): React.JSX.Element {
       />
 
       <div className="mt-6 border-b border-neutral-200">
-        <nav className="flex gap-1">
+        <nav className="-mb-px flex gap-1 overflow-x-auto" aria-label="Bundle views">
           {tabs.map((meta) => (
             <button
               key={meta.key}
               type="button"
               onClick={() => setTab(meta.key)}
+              aria-current={tab === meta.key ? 'page' : undefined}
               className={[
-                'inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition',
+                'inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition',
                 tab === meta.key
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-800',
@@ -81,6 +83,7 @@ export function BundleViewer({ result }: BundleViewerProps): React.JSX.Element {
             >
               {meta.icon}
               {meta.label}
+              {meta.key === 'groups' && <Count value={groups.length} />}
               {meta.key === 'connections' &&
                 result.sop.aggregatedConnections.length > 0 && (
                   <Count value={result.sop.aggregatedConnections.length} />
@@ -92,10 +95,11 @@ export function BundleViewer({ result }: BundleViewerProps): React.JSX.Element {
       </div>
 
       <div className="mt-6">
-        {tab === 'graph' && (
-          <CallGraphView
-            callGraph={result.bundle.callGraph}
+        {tab === 'groups' && (
+          <ProcessGroupsView
+            groups={groups}
             processes={processes}
+            callGraph={result.bundle.callGraph}
             onSelect={setSelected}
           />
         )}

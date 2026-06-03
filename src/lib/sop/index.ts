@@ -8,13 +8,26 @@
  */
 
 export {
-  generateSopAndTestPlan,
+  generateGroupSop,
   SopGenerationError,
   SOP_GENERATOR_VERSION,
 } from './client';
 export type { SopTokenUsage } from './client';
-export { buildSopSystemPrompt, buildSopUserPrompt } from './prompt';
-export type { SopContext } from './prompt';
+export {
+  buildConsolidatedSopSystemPrompt,
+  buildGroupSopUserPrompt,
+} from './prompt';
+export type { GroupSopPromptInput } from './prompt';
+export {
+  groupByComponent,
+  buildHierarchyForest,
+  hierarchyToText,
+} from './grouping';
+export type {
+  ProcessGroup,
+  HierarchyNode,
+  GroupNodeRole,
+} from './grouping';
 export {
   SopModelOutputSchema,
   TestPlanSchema,
@@ -47,4 +60,6 @@ export type {
   ConnectionRequirement,
   SopGenerationResult,
   SopGenerationMetadata,
+  GroupSopResult,
+  ProcessGroupKind,
 } from '@/types/sop';

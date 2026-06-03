@@ -1,26 +1,30 @@
 /**
- * OpenAI-backed SOP + Test-Plan generator client (Phase 3).
+ * OpenAI-backed consolidated SOP + Test-Plan generator client (Phase 3).
  *
- * `generateSopAndTestPlan` sends one analyzed `V1ProcessIR` (plus optional
- * bundle context) to OpenAI, parses the JSON response, and validates it against
- * the SOP model-output Zod schema. On a validation failure it performs exactly
- * ONE corrective retry that feeds the Zod error back to the model. Token usage
- * is logged per request and returned in the result's metadata.
+ * `generateGroupSop` sends a whole process GROUP (its member IRs + parent-child
+ * hierarchy) to OpenAI, parses the JSON response, and validates it against the
+ * SOP model-output Zod schema. On a validation failure it performs exactly ONE
+ * corrective retry that feeds the Zod error back to the model. Token usage is
+ * logged per request and returned in the result's metadata. The group identity
+ * (groupId, members, entry name) is stamped deterministically by code.
  *
- * This mirrors `src/lib/analyzer/client.ts` exactly (same Chat Completions
- * surface, JSON mode, retry, deterministic metadata stamping). Per the Phase 3
- * task, OpenAI is used here for parity with Phase 1 (the project brief's earlier
- * "Claude for SOP" note is superseded by that instruction).
+ * This mirrors `src/lib/analyzer/client.ts` (same Chat Completions surface, JSON
+ * mode, retry, deterministic metadata stamping). Per the Phase 3 task, OpenAI is
+ * used here for parity with Phase 1 (the project brief's earlier "Claude for SOP"
+ * note is superseded by that instruction).
  *
  * Strict TS, no `any`.
  */
 
 import OpenAI from 'openai';
 
-import type { V1ProcessIR } from '@/types/ir';
-import type { SopGenerationResult } from '@/types/sop';
+import type { GroupSopResult, SopGenerationResult } from '@/types/sop';
 
-import { buildSopSystemPrompt, buildSopUserPrompt, type SopContext } from './prompt';
+import {
+  buildConsolidatedSopSystemPrompt,
+  buildGroupSopUserPrompt,
+  type GroupSopPromptInput,
+} from './prompt';
 import { SopModelOutputSchema } from './schema';
 
 // Same model as the analyzer: gpt-4.1 follows long, schema-heavy instructions
@@ -150,19 +154,18 @@ function stampMetadata(
 }
 
 /**
- * Generate a v2 SOP + test plan + connection requirements for one analyzed
- * process IR using OpenAI.
+ * Generate ONE consolidated v2 SOP + end-to-end test plan + connection
+ * requirements for a whole process group using OpenAI. The group identity is
+ * stamped onto the result by code (never trusted from the model).
  *
- * @param ir      The analyzed `V1ProcessIR` (from Phase 1).
- * @param context Optional bundle context (sibling summary for SOP narrative).
+ * @param input The group, its member IRs, names, call graph, and owners.
  */
-export async function generateSopAndTestPlan(
-  ir: V1ProcessIR,
-  context: SopContext = { bundleSummary: 'a standalone process.' },
-): Promise<SopGenerationResult> {
+export async function generateGroupSop(
+  input: GroupSopPromptInput,
+): Promise<GroupSopResult> {
   const client = getClient();
-  const system = buildSopSystemPrompt();
-  const userPrompt = buildSopUserPrompt(ir, context);
+  const system = buildConsolidatedSopSystemPrompt();
+  const userPrompt = buildGroupSopUserPrompt(input);
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -183,8 +186,11 @@ export async function generateSopAndTestPlan(
 
   const firstText = first.choices[0]?.message?.content ?? '';
 
+  const finalize = (base: SopGenerationResult): GroupSopResult =>
+    stampGroup(base, input);
+
   try {
-    return stampMetadata(parseAndValidate(firstText), tokens);
+    return finalize(stampMetadata(parseAndValidate(firstText), tokens));
   } catch (err) {
     const validationDetail = err instanceof Error ? err.message : String(err);
 
@@ -208,7 +214,7 @@ export async function generateSopAndTestPlan(
 
     const retryText = retry.choices[0]?.message?.content ?? '';
     try {
-      return stampMetadata(parseAndValidate(retryText), tokens);
+      return finalize(stampMetadata(parseAndValidate(retryText), tokens));
     } catch (retryErr) {
       const retryDetail =
         retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -217,4 +223,20 @@ export async function generateSopAndTestPlan(
       );
     }
   }
+}
+
+/** Stamp the deterministic, code-owned group identity onto a result. */
+function stampGroup(
+  base: SopGenerationResult,
+  input: GroupSopPromptInput,
+): GroupSopResult {
+  const { group, nameById } = input;
+  return {
+    ...base,
+    groupId: group.groupId,
+    kind: group.isSingleton ? 'individual' : 'consolidated',
+    memberProcedureIds: group.memberIds,
+    entryProcedureName:
+      nameById.get(group.entryIds[0]) ?? group.entryIds[0],
+  };
 }

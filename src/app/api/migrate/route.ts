@@ -28,7 +28,7 @@ import {
   saveRunning,
   serializeMigrationResult,
 } from '@/lib/migration/store';
-import { generateBundleSops } from '@/lib/sop';
+import { generateBundleSops, groupByComponent } from '@/lib/sop';
 import type { MigrationEvent, MigrationStage } from '@/lib/sse-client';
 
 // The pipeline calls OpenAI + node:crypto, so it must run on the Node runtime.
@@ -158,27 +158,30 @@ export async function POST(request: Request): Promise<Response> {
           totalMs: analyzed.timings.totalMs,
         });
 
-        // ── Stage 3: SOPs ───────────────────────────────────────────────────
+        // ── Stage 3: SOPs (one consolidated SOP per connected group) ────────
         stage = 'sop';
-        const sopTotal = analyzed.irs.size;
+        const sopTotal = groupByComponent(analyzed.callGraph).length;
         send({ type: 'sop_started', total: sopTotal });
         let sopCompleted = 0;
+        const ownersById = new Map(
+          bundle.processes.map((p) => [p.id, p.owner]),
+        );
         const sopResult = await generateBundleSops(analyzed, {
+          ownersById,
           onProgress: (event) => {
             if (
-              event.type === 'process_complete' ||
-              event.type === 'process_error'
+              event.type === 'group_complete' ||
+              event.type === 'group_error'
             ) {
               sopCompleted += 1;
               send({
                 type: 'sop_progress',
-                procedureId: event.procedureId,
-                procedureName:
-                  nameById.get(event.procedureId) ?? event.procedureId,
+                groupId: event.groupId,
+                entryName: event.entryName,
                 durationMs: event.durationMs ?? 0,
                 completed: sopCompleted,
                 total: sopTotal,
-                failed: event.type === 'process_error',
+                failed: event.type === 'group_error',
               });
             }
           },
