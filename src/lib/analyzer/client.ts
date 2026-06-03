@@ -34,6 +34,22 @@ const TEMPERATURE = 0.1;
 /** Analyzer version, stamped into `metadata.parserVersion`. */
 export const ANALYZER_VERSION = '1.0.0';
 
+/** Token counts consumed by one `analyzeProcess` call (summed across retries). */
+export interface AnalyzerTokenUsage {
+  /** Total prompt (input) tokens across attempt 1 and the optional retry. */
+  input: number;
+  /** Total completion (output) tokens across attempt 1 and the optional retry. */
+  output: number;
+}
+
+/** Result of `analyzeProcess`: the validated IR plus the tokens it cost. */
+export interface AnalyzeProcessResult {
+  /** The validated, metadata-stamped IR. */
+  ir: V1ProcessIR;
+  /** Token usage accumulated across every LLM call this analysis made. */
+  tokens: AnalyzerTokenUsage;
+}
+
 /** Raised when the analyzer cannot produce valid IR (after the retry). */
 export class AnalyzerError extends Error {
   constructor(message: string) {
@@ -125,8 +141,22 @@ function stampMetadata(ir: V1ProcessIR, source: string): V1ProcessIR {
   };
 }
 
+/** Accumulate prompt/completion tokens from a completion's `usage` block. */
+function addUsage(
+  acc: AnalyzerTokenUsage,
+  usage: OpenAI.Completions.CompletionUsage | undefined,
+): void {
+  if (!usage) return;
+  acc.input += usage.prompt_tokens;
+  acc.output += usage.completion_tokens;
+}
+
 /**
  * Analyze a single v1 process source into validated IR using OpenAI.
+ *
+ * Returns the validated IR alongside the token usage it cost (summed across the
+ * first attempt and the optional corrective retry) so callers — notably the
+ * bundle orchestrator — can aggregate cost without re-parsing the log output.
  *
  * @param source  Raw v1 process source text.
  * @param context Call-graph context for HAR ref resolution.
@@ -134,7 +164,7 @@ function stampMetadata(ir: V1ProcessIR, source: string): V1ProcessIR {
 export async function analyzeProcess(
   source: string,
   context: CallGraphContext,
-): Promise<V1ProcessIR> {
+): Promise<AnalyzeProcessResult> {
   const client = getClient();
   const system = buildSystemPrompt();
   const userPrompt = buildUserPrompt(source, context);
@@ -144,6 +174,8 @@ export async function analyzeProcess(
     { role: 'user', content: userPrompt },
   ];
 
+  const tokens: AnalyzerTokenUsage = { input: 0, output: 0 };
+
   const first = await client.chat.completions.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
@@ -152,11 +184,12 @@ export async function analyzeProcess(
     messages,
   });
   logUsage('attempt 1', first.usage);
+  addUsage(tokens, first.usage);
 
   const firstText = first.choices[0]?.message?.content ?? '';
 
   try {
-    return stampMetadata(parseAndValidate(firstText), source);
+    return { ir: stampMetadata(parseAndValidate(firstText), source), tokens };
   } catch (err) {
     const validationDetail = err instanceof Error ? err.message : String(err);
 
@@ -176,10 +209,11 @@ export async function analyzeProcess(
       ],
     });
     logUsage('attempt 2 (retry)', retry.usage);
+    addUsage(tokens, retry.usage);
 
     const retryText = retry.choices[0]?.message?.content ?? '';
     try {
-      return stampMetadata(parseAndValidate(retryText), source);
+      return { ir: stampMetadata(parseAndValidate(retryText), source), tokens };
     } catch (retryErr) {
       const retryDetail =
         retryErr instanceof Error ? retryErr.message : String(retryErr);

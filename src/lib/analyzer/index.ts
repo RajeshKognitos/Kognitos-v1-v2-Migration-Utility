@@ -7,7 +7,15 @@
  */
 
 export { analyzeProcess, AnalyzerError, ANALYZER_VERSION } from './client';
+export type { AnalyzeProcessResult, AnalyzerTokenUsage } from './client';
 export { V1ProcessIRSchema } from './schema';
 export type { AnalyzerOutput } from './schema';
 export type { CallGraphContext } from './prompt';
 export { buildSystemPrompt, buildUserPrompt } from './prompt';
+export { analyzeBundle, DEFAULT_COST_RATES } from './orchestrator';
+export type {
+  AnalyzeBundleOptions,
+  AnalyzedBundle,
+  BundleAnalysisError,
+  ProgressEvent,
+} from './orchestrator';

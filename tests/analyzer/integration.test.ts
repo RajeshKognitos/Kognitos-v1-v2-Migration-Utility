@@ -100,7 +100,7 @@ describe.skipIf(!RUN)('analyzeProcess — vendor helpdesk entry process (real Op
         .map((p) => ({ name: p.name, procedureId: p.id })),
     };
 
-    ir = await analyzeProcess(target.text, context);
+    ({ ir } = await analyzeProcess(target.text, context));
   }, 120_000);
 
   it('captures at least two subprocess calls', () => {
